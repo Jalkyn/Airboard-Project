@@ -2,11 +2,22 @@
 
 This guide will help you deploy the AirBoard frontend to Vercel and configure it securely with your own API keys.
 
+## ⚠️ IMPORTANT : Architecture de Déploiement
+
+**Vercel ne peut PAS exécuter un serveur Flask qui doit tourner en continu.**
+
+Votre application doit être déployée en **2 parties séparées** :
+
+1. **Frontend React** → Déployé sur **Vercel** (ce guide)
+2. **Backend Flask** → Déployé sur **Railway** ou **Render** (voir [BACKEND_DEPLOYMENT.md](./BACKEND_DEPLOYMENT.md))
+
 ## 📋 Prerequisites
 
 1. **GitHub Account** - Your project is already on GitHub (`Jalkyn_Airboard_Project`)
 2. **Vercel Account** - Sign up at [vercel.com](https://vercel.com) (free tier available)
-3. **Backend API** - Your Flask backend should be deployed separately (Railway, Render, Heroku, etc.)
+3. **Backend API** - Your Flask backend **MUST** be deployed separately first (Railway, Render, Heroku, etc.)
+   - ⚠️ **IMPORTANT** : Déployez d'abord le backend avant de configurer Vercel
+   - Voir [BACKEND_DEPLOYMENT.md](./BACKEND_DEPLOYMENT.md) pour les instructions complètes
 
 ## 🔐 Security: API Keys Configuration
 

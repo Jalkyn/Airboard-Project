@@ -49,26 +49,44 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration CORS pour permettre les requêtes depuis l'iframe React
+# Configuration CORS pour permettre les requêtes depuis l'iframe React et Vercel
 try:
     from flask_cors import CORS
+    # Permettre toutes les origines en production (sécurisé car les clés API sont côté serveur)
+    # En production, vous pouvez restreindre aux domaines spécifiques si nécessaire
+    allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
+    if allowed_origins == "*":
+        origins = ["*"]
+    else:
+        origins = allowed_origins.split(",")
+    
     CORS(app, resources={
         r"/*": {
-            "origins": ["*"],  # Permettre toutes les origines pour le développement local
+            "origins": origins,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Cache-Control"],
             "supports_credentials": True
         }
     })
-    logger.info("CORS activé via flask-cors")
+    logger.info(f"CORS activé via flask-cors (origins: {origins})")
 except ImportError:
     # Fallback : configuration CORS manuelle si flask-cors n'est pas installé
+    allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
+    
     @app.after_request
     def after_request(response):
-        response.headers.add('Access-Control-Allow-Origin', '*')
+        if allowed_origins == "*":
+            response.headers.add('Access-Control-Allow-Origin', '*')
+        else:
+            # Permettre seulement les origines spécifiées
+            origin = request.headers.get('Origin')
+            if origin and origin in allowed_origins.split(","):
+                response.headers.add('Access-Control-Allow-Origin', origin)
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,Cache-Control')
         response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
         response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    logger.info(f"CORS activé manuellement (origins: {allowed_origins})")
         return response
     logger.info("CORS activé manuellement (flask-cors non disponible)")
 
@@ -2830,6 +2848,16 @@ if __name__ == "__main__":
     else:
         logger.info("  - http://127.0.0.1:5000/api/chat (Chatbot - DÉSACTIVÉ)")
     logger.info("=" * 60)
+    
+    # Configuration pour le déploiement (utilise les variables d'environnement)
+    # En production, les plateformes cloud définissent PORT automatiquement
+    host = os.environ.get("HOST", "127.0.0.1")  # Par défaut localhost pour dev local
+    port = int(os.environ.get("PORT", 5000))  # Par défaut 5000, mais Railway/Render utilisent leur propre PORT
+    
+    # Mode debug uniquement en développement local
+    debug_mode = os.environ.get("FLASK_DEBUG", "False").lower() == "true"
+    
     # Désactiver use_reloader pour éviter les redémarrages constants dus aux changements TensorFlow
     # debug=True reste actif pour les erreurs détaillées, mais sans auto-reload
-    app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=False)
+    logger.info(f"Démarrage sur {host}:{port} (debug={debug_mode})")
+    app.run(host=host, port=port, debug=debug_mode, use_reloader=False)

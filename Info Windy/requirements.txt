@@ -19,6 +19,7 @@ tensorflow>=2.13.0
 
 # Utilitaires
 python-dateutil>=2.8.0
+python-dotenv>=1.0.0
 
 # Dépendances pour 22.py (génération de rapports)
 fpdf2>=2.7.0
