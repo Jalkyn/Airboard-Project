@@ -31,4 +31,16 @@ python-docx>=1.0.0
 plotly>=5.17.0
 matplotlib>=3.7.0
 kaleido>=0.2.1
+# Dépendances additionnelles détectées automatiquement
+xarray
+scipy
+langchain-core
+langchain-huggingface
+langchain-community
+sentence-transformers
+langchain-cerebras
+pypdf
+openpyxl
+langchain-text-splitters
+langchain-classic
 
