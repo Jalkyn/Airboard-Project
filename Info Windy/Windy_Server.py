@@ -87,7 +87,6 @@ except ImportError:
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response
     logger.info(f"CORS activé manuellement (origins: {allowed_origins})")
-        return response
     logger.info("CORS activé manuellement (flask-cors non disponible)")
 
 # Verrou pour éviter les appels simultanés à compute_fields() et run_fusion_once()
