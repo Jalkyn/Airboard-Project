@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { getApiUrl, API_ENDPOINTS } from '../lib/api-config';
 
 // Cache global pour partager les données entre composants
 let globalCache: {
@@ -61,7 +62,7 @@ export function useDashboardData(
       }
       
       // Construire l'URL
-      let url = `http://127.0.0.1:5000/api/dashboard/data`;
+      let url = getApiUrl(API_ENDPOINTS.DASHBOARD_DATA);
       const params: string[] = [];
       
       if (dataDir && dataDir.trim() !== '' && dataDir.trim().toLowerCase() !== 'data') {

@@ -52,7 +52,7 @@
     },
     build: {
       target: 'esnext',
-      outDir: 'build',
+      outDir: 'dist', // Vercel expects 'dist' directory
     },
     server: {
       port: 3000,

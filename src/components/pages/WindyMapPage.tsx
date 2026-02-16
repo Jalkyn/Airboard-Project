@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, memo, useCallback } from 'react';
 import TopBar from '../TopBar';
 import './WindyMapPage.css';
+import { getApiUrl, API_ENDPOINTS, API_BASE_URL } from '../../lib/api-config';
 
 type Page = 'home' | 'dashboard' | 'map' | 'rapports' | 'about-us' | 'how-it-works';
 
@@ -25,7 +26,7 @@ const WindyMapPage = memo(function WindyMapPage({ onNavigate }: WindyMapPageProp
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2000); // Réduit à 2s
       
-      const response = await fetch('http://127.0.0.1:5000/api/health', {
+      const response = await fetch(getApiUrl(API_ENDPOINTS.HEALTH), {
         method: 'GET',
         mode: 'cors',
         cache: 'no-cache',
@@ -61,7 +62,7 @@ const WindyMapPage = memo(function WindyMapPage({ onNavigate }: WindyMapPageProp
 
     const iframe = document.createElement('iframe');
     iframe.id = 'windy-iframe';
-    iframe.src = 'http://127.0.0.1:5000/';
+    iframe.src = getApiUrl(API_ENDPOINTS.WINDY_APP);
     
     // Optimisations de performance
     iframe.setAttribute('loading', 'eager'); // Charger immédiatement
@@ -292,7 +293,7 @@ const WindyMapPage = memo(function WindyMapPage({ onNavigate }: WindyMapPageProp
                 <div className="text-center">
                   <div className="text-[var(--foreground)] text-lg mb-4">Vérification du serveur...</div>
                   <div className="text-[var(--muted-foreground)] text-sm">
-                    Connexion à http://127.0.0.1:5000
+                    Connexion à {API_BASE_URL}
                   </div>
                 </div>
               )}
@@ -310,7 +311,7 @@ const WindyMapPage = memo(function WindyMapPage({ onNavigate }: WindyMapPageProp
                 <div className="text-center max-w-md px-6">
                   <div className="text-[var(--destructive)] text-lg mb-4">⚠️ Serveur Flask non accessible</div>
                   <div className="text-[var(--muted-foreground)] text-sm mb-4">
-                    Impossible de se connecter au serveur Flask sur http://127.0.0.1:5000
+                    Impossible de se connecter au serveur Flask sur {API_BASE_URL}
                   </div>
                   <div className="text-[var(--muted-foreground)] text-xs mb-4 space-y-2">
                     <div className="bg-[var(--card)] border border-[var(--border)] px-4 py-3 rounded-lg text-left">

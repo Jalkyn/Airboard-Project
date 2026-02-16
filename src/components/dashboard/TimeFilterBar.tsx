@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { LiveClock } from './LiveClock';
 import { useDataDir } from '../../contexts/DataDirContext';
 import { toast } from 'sonner';
+import { getApiUrl, API_ENDPOINTS } from '../../lib/api-config';
 
 interface TimeFilterBarProps {
   selectedPeriod: 'day' | 'month' | 'year';
@@ -43,7 +44,7 @@ export function TimeFilterBar({ selectedPeriod, onPeriodChange, selectedDate, on
       setDataDir(trimmedPath);
       // Synchroniser avec le backend pour l'interface Windy
       try {
-        await fetch('http://127.0.0.1:5000/api/data-dir', {
+        await fetch(getApiUrl(API_ENDPOINTS.DATA_DIR), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ data_dir: trimmedPath })
@@ -56,7 +57,7 @@ export function TimeFilterBar({ selectedPeriod, onPeriodChange, selectedDate, on
       setDataDir(null);
       // Synchroniser avec le backend
       try {
-        await fetch('http://127.0.0.1:5000/api/data-dir', {
+        await fetch(getApiUrl(API_ENDPOINTS.DATA_DIR), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ data_dir: null })
@@ -72,7 +73,7 @@ export function TimeFilterBar({ selectedPeriod, onPeriodChange, selectedDate, on
     setDataDir(null);
     // Synchroniser avec le backend
     try {
-      await fetch('http://127.0.0.1:5000/api/data-dir', {
+      await fetch(getApiUrl(API_ENDPOINTS.DATA_DIR), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data_dir: null })
@@ -96,7 +97,7 @@ export function TimeFilterBar({ selectedPeriod, onPeriodChange, selectedDate, on
         setDataDir(folderName);
         // Synchroniser avec le backend
         try {
-          await fetch('http://127.0.0.1:5000/api/data-dir', {
+          await fetch(getApiUrl(API_ENDPOINTS.DATA_DIR), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data_dir: folderName })

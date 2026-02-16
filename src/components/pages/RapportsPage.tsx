@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useDataDir } from '../../contexts/DataDirContext'
+import { getApiUrl, API_ENDPOINTS } from '../../lib/api-config'
 
 type Page = 'home' | 'dashboard' | 'map' | 'rapports' | 'about-us' | 'how-it-works'
 
@@ -47,7 +48,7 @@ export default function RapportsPage({ onNavigate }: RapportsPageProps = {}) {
     setFileInfo({})
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/reports/generate', {
+      const response = await fetch(getApiUrl(API_ENDPOINTS.REPORTS_GENERATE), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -104,7 +105,7 @@ export default function RapportsPage({ onNavigate }: RapportsPageProps = {}) {
 
     try {
       toast.info('Génération du PDF en cours...')
-      const response = await fetch('http://127.0.0.1:5000/api/reports/generate-pdf', {
+      const response = await fetch(getApiUrl(API_ENDPOINTS.REPORTS_GENERATE_PDF), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
