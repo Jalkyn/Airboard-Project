@@ -17,6 +17,9 @@ tensorflow>=2.13.0
 # OU pour CPU uniquement (plus léger) :
 # tensorflow-cpu>=2.13.0
 
+# Compat: Transformers + Keras 3 require legacy tf-keras shim
+tf-keras
+
 # Utilitaires
 python-dateutil>=2.8.0
 python-dotenv>=1.0.0
