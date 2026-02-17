@@ -54,7 +54,7 @@ try:
     from flask_cors import CORS
     # Permettre toutes les origines en production (sécurisé car les clés API sont côté serveur)
     # En production, vous pouvez restreindre aux domaines spécifiques si nécessaire
-    allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
+    allowed_origins = os.environ.get("ALLOWED_ORIGINS", "https://localhost")
     if allowed_origins == "*":
         origins = ["*"]
     else:
