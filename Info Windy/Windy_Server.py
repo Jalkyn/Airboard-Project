@@ -2861,7 +2861,7 @@ if __name__ == "__main__":
     
     # Configuration pour le déploiement (utilise les variables d'environnement)
     # En production, les plateformes cloud définissent PORT automatiquement
-    host = os.environ.get("HOST", "127.0.0.1")  # Par défaut localhost pour dev local
+    host = os.environ.get("HOST", "0.0.0.0")  # Par défaut 0.0.0.0 pour cloud/deployment
     port = int(os.environ.get("PORT", 5000))  # Par défaut 5000, mais Railway/Render utilisent leur propre PORT
     
     # Mode debug uniquement en développement local
