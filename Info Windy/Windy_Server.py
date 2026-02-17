@@ -89,6 +89,17 @@ except ImportError:
     logger.info(f"CORS activé manuellement (origins: {allowed_origins})")
     logger.info("CORS activé manuellement (flask-cors non disponible)")
 
+
+# Autoriser l'embed de l'interface Windy dans une iframe (ex: frontend Vercel)
+# Ne pas envoyer X-Frame-Options pour éviter de bloquer l'iframe
+@app.after_request
+def allow_embed_in_iframe(response):
+    # frame-ancestors autorise qui peut mettre cette page en iframe ('self' + origines optionnelles)
+    frame_ancestors = os.environ.get("FRAME_ANCESTORS", "self *")
+    response.headers["Content-Security-Policy"] = f"frame-ancestors {frame_ancestors}"
+    return response
+
+
 # Verrou pour éviter les appels simultanés à compute_fields() et run_fusion_once()
 # Cela évite les conflits entre le chatbot et la mise à jour automatique du frontend
 _fusion_lock = threading.Lock()

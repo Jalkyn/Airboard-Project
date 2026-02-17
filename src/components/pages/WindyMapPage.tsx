@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, memo, useCallback } from 'react';
 import TopBar from '../TopBar';
 import './WindyMapPage.css';
-import { getApiUrl, API_ENDPOINTS, API_BASE_URL } from '../../lib/api-config';
+import { getApiUrl, getWindyIframeSrc, API_ENDPOINTS, API_BASE_URL } from '../../lib/api-config';
 
 type Page = 'home' | 'dashboard' | 'map' | 'rapports' | 'about-us' | 'how-it-works';
 
@@ -62,7 +62,7 @@ const WindyMapPage = memo(function WindyMapPage({ onNavigate }: WindyMapPageProp
 
     const iframe = document.createElement('iframe');
     iframe.id = 'windy-iframe';
-    iframe.src = getApiUrl(API_ENDPOINTS.WINDY_APP);
+    iframe.src = getWindyIframeSrc();
     
     // Optimisations de performance
     iframe.setAttribute('loading', 'eager'); // Charger immédiatement
