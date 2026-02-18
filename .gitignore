@@ -53,6 +53,7 @@ logs/
 
 # Data files (sensitive)
 Info Windy/data/
+!Info Windy/GP2 03-12-24_07-30-33.txt
 gfs_data/
 conversations_weather/
 Info Windy/conversations_weather/

@@ -1,3 +1,41 @@
+import sys
+import subprocess
+import threading
+
+from flask import Flask, jsonify, render_template, request, send_from_directory
+app = Flask(__name__)
+
+# --- Lancer le générateur de données fake_data_generator.py au démarrage (si pas déjà lancé) ---
+FAKE_DATA_DIR = Path(__file__).parent  # Les fichiers seront générés ici
+FAKE_DATA_TEMPLATE = FAKE_DATA_DIR / "GP2 03-12-24_07-30-33.txt"  # À adapter si besoin
+FAKE_DATA_PROCESS = None
+
+def start_fake_data_generator():
+    global FAKE_DATA_PROCESS
+    # Vérifier si un process n'est pas déjà lancé
+    if FAKE_DATA_PROCESS is not None and FAKE_DATA_PROCESS.poll() is None:
+        return  # Déjà lancé
+    # Lancer le générateur en tâche de fond
+    if not FAKE_DATA_TEMPLATE.exists():
+        print(f"[FAKE DATA] Template manquant: {FAKE_DATA_TEMPLATE}")
+        return
+    cmd = [sys.executable, str(FAKE_DATA_DIR / "fake_data_generator.py"),
+           "--template", str(FAKE_DATA_TEMPLATE),
+           "--out", str(FAKE_DATA_DIR),
+           "--station", "GP2",
+           "--interval", "60"]
+    try:
+        FAKE_DATA_PROCESS = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("[FAKE DATA] Générateur lancé en tâche de fond.")
+    except Exception as e:
+        print(f"[FAKE DATA] Erreur au lancement du générateur: {e}")
+
+# Lancer au démarrage du serveur (thread pour ne pas bloquer Flask)
+def _start_generator_thread():
+    t = threading.Thread(target=start_fake_data_generator, daemon=True)
+    t.start()
+
+_start_generator_thread()
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -8,7 +46,6 @@ import logging
 
 import numpy as np
 import pandas as pd
-from flask import Flask, jsonify, render_template, request, send_from_directory
 import requests
 import math
 import os
@@ -124,90 +161,32 @@ def compute_fields(use_cache: bool = True, data_dir: Path = None) -> Dict[str, A
         Dictionnaire avec les données fusionnées
     """
     global _last_fusion_result, _last_fusion_timestamp
-    
-    # Vérifier le cache d'abord (mais seulement si c'est le même dossier)
+
+    # Forcer le dossier de données à celui du générateur
+    core.STATION_CFG.data_dir = FAKE_DATA_DIR
+
+    # Vérifier le cache d'abord
     if use_cache and _last_fusion_result is not None and _last_fusion_timestamp is not None:
         from datetime import datetime
         cache_age = (datetime.now() - _last_fusion_timestamp).total_seconds()
-        # Ne pas utiliser le cache si un dossier personnalisé est demandé
-        if data_dir is None and cache_age < _fusion_cache_ttl:
+        if cache_age < _fusion_cache_ttl:
             return _last_fusion_result
-    
-    # Acquérir le verrou pour éviter les appels simultanés
+
     with _fusion_lock:
-        # Vérifier à nouveau le cache après avoir acquis le verrou (double-check)
+        # Double-check cache
         if use_cache and _last_fusion_result is not None and _last_fusion_timestamp is not None:
             from datetime import datetime
             cache_age = (datetime.now() - _last_fusion_timestamp).total_seconds()
-            # Ne pas utiliser le cache si un dossier personnalisé est demandé
-            if data_dir is None and cache_age < _fusion_cache_ttl:
+            if cache_age < _fusion_cache_ttl:
                 return _last_fusion_result
-        
-        # Sauvegarder le data_dir original
-        original_data_dir = core.STATION_CFG.data_dir
-        
+
         try:
-            # Modifier temporairement le data_dir si un dossier personnalisé est fourni
-            if data_dir is not None:
-                # Vérifier que le dossier existe avant de l'utiliser
-                if not data_dir.exists() or not data_dir.is_dir():
-                    logger.error(f"Dossier personnalisé n'existe pas: {data_dir}")
-                    logger.error(f"Chemin absolu: {data_dir.resolve()}")
-                    # Vérifier si le dossier par défaut existe
-                    if core.STATION_CFG.data_dir.exists():
-                        logger.warning("Utilisation du dossier par défaut à la place")
-                        data_dir = None  # Utiliser le défaut
-                    else:
-                        # Aucun dossier disponible, lever une erreur
-                        raise FileNotFoundError(f"Aucun dossier de données disponible. Dossier personnalisé: {data_dir}, Dossier par défaut: {core.STATION_CFG.data_dir}")
-                else:
-                    logger.info(f"Utilisation du dossier personnalisé pour compute_fields: {data_dir}")
-                    logger.info(f"Chemin absolu: {data_dir.resolve()}")
-                    # Vérifier qu'il y a des fichiers dans le dossier
-                    txt_files = list(data_dir.glob("*.txt"))
-                    logger.info(f"Fichiers .txt trouvés dans le dossier: {len(txt_files)}")
-                    if txt_files:
-                        logger.info(f"Exemples de fichiers: {[f.name for f in txt_files[:5]]}")
-                    core.STATION_CFG.data_dir = data_dir
-            
-            logger.debug("Calcul du champ fusionné (verrou acquis)")
             station_meas, model, fused = core.run_fusion_once(with_plots=False)
         except FileNotFoundError as e:
-            # Si le fichier n'est pas trouvé, essayer avec le dossier par défaut (seulement si différent)
-            if data_dir is not None and data_dir != original_data_dir:
-                logger.warning(f"Fichier non trouvé dans le dossier personnalisé: {e}")
-                logger.warning(f"Dossier personnalisé: {data_dir}")
-                # Vérifier si le dossier par défaut existe
-                if original_data_dir.exists():
-                    logger.info("Tentative avec le dossier par défaut...")
-                    # Restaurer le data_dir original
-                    core.STATION_CFG.data_dir = original_data_dir
-                    # Réessayer avec le dossier par défaut
-                    try:
-                        station_meas, model, fused = core.run_fusion_once(with_plots=False)
-                    except FileNotFoundError as e2:
-                        logger.error(f"Fichier également non trouvé dans le dossier par défaut: {e2}")
-                        raise FileNotFoundError(f"Aucun fichier de données trouvé. Dossier personnalisé: {data_dir}, Dossier par défaut: {original_data_dir}. Erreur: {e}")
-                else:
-                    logger.error(f"Le dossier par défaut n'existe pas non plus: {original_data_dir}")
-                    raise FileNotFoundError(f"Aucun dossier de données disponible. Dossier personnalisé: {data_dir}, Dossier par défaut: {original_data_dir}. Erreur: {e}")
-            else:
-                # Si c'était déjà le défaut, propager l'erreur avec plus de détails
-                logger.error(f"Erreur FileNotFoundError: {e}")
-                logger.error(f"Dossier utilisé: {core.STATION_CFG.data_dir}")
-                logger.error(f"Dossier existe: {core.STATION_CFG.data_dir.exists()}")
-                if core.STATION_CFG.data_dir.exists():
-                    # Lister les fichiers pour aider au débogage
-                    all_files = list(core.STATION_CFG.data_dir.glob("*.txt"))
-                    logger.error(f"Fichiers .txt dans le dossier: {[f.name for f in all_files]}")
-                raise
-        finally:
-            # Restaurer le data_dir original
-            if data_dir is not None:
-                core.STATION_CFG.data_dir = original_data_dir
+            logger.error(f"Erreur FileNotFoundError: {e}")
+            raise
 
         ny, nx = core.GRID_CFG.ny, core.GRID_CFG.nx
-
         lat_vals = np.linspace(core.GRID_CFG.lat_min, core.GRID_CFG.lat_max, ny)
         lon_vals = np.linspace(core.GRID_CFG.lon_min, core.GRID_CFG.lon_max, nx)
         lat2d, lon2d = np.meshgrid(lat_vals, lon_vals, indexing="ij")
@@ -226,7 +205,7 @@ def compute_fields(use_cache: bool = True, data_dir: Path = None) -> Dict[str, A
             "lon": lon2d.tolist(),
 
             "temp": fused.temp_corr.tolist(),
-            "rh": fused.rh_corr.tolist(),          # ← IMPORTANT : humidité
+            "rh": fused.rh_corr.tolist(),
             "u": fused.u_corr.tolist(),
             "v": fused.v_corr.tolist(),
 
@@ -245,12 +224,9 @@ def compute_fields(use_cache: bool = True, data_dir: Path = None) -> Dict[str, A
                 "air_temp_c": float(station_meas.air_temp_c),
             },
         }
-        
-        # Mettre à jour le cache
-        from datetime import datetime
+
         _last_fusion_result = data
         _last_fusion_timestamp = datetime.now()
-        
         return data
 
 
