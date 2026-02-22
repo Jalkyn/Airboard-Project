@@ -11,6 +11,7 @@ Fake Time-Series File Generator (Wind Station style) — Chained by default
 Commande à copier dans le terminal python fake_data_generator.py --template "GP2 03-12-24_07-30-33.txt"
 """
 
+
 import argparse
 import io
 import re
@@ -18,9 +19,9 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
+import requests
 
 
 # ------------------ helpers format ------------------
@@ -252,67 +253,39 @@ def _format_val(v, dec):
         return s.replace('.', ',') if dec == ',' else s
     return str(v)
 
-def write_file(df_all, meta, out_dir, station="GP2", coherent_time=True):
-    df_all = _round_numeric_df(df_all, ndigits=1)
 
-    schema = detect_time_schema(df_all, meta)
-    ts = get_time_series(df_all, schema).dropna()
-
-    target_time = None
-    if coherent_time and len(ts) > 0:
-        target_time = next_coherent_time(ts)
-        set_last_time_in_df(df_all, schema, target_time)
-
-    out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
-    now = target_time if target_time is not None else datetime.now()
-    fname = f"{station}_{now.strftime('%d-%m-%y_%H-%M-%S')}.txt"
-    fpath = out_dir / fname
-
-    # Écriture manuelle pour TOUT (1 ou 2 headers) afin de maîtriser le séparateur (espace) et la décimale
+# --- Instead of writing files, POST the latest row to backend ---
+def post_row_to_backend(row, meta, station="GP2", backend_url="http://localhost:5000/api/gp2_data"):
+    # Prepare row as dict (with rounded values)
     dec = meta['decimal']
-    sep = meta['out_sep']   # ' ' si l'entrée était à espaces
-    with open(fpath, 'w', encoding='utf-8') as f:
-        if meta['header_lines'] == 2:
-            f.write(sep.join(meta['top']) + "\n")
-            f.write(sep.join(meta['bot']) + "\n")
+    row_dict = {k: _format_val(v, dec) for k, v in row.items()}
+    row_dict['station'] = station
+    try:
+        resp = requests.post(backend_url, json=row_dict, timeout=5)
+        if resp.status_code == 200:
+            print(f"[POST] Sent row to backend: {row_dict}")
         else:
-            f.write(sep.join(meta.get('header', list(df_all.columns))) + "\n")
-
-        for _, row in df_all.iterrows():
-            vals = []
-            for k, v in row.items():
-                # Si la colonne est "Timestamp unique" mis en chaîne plus haut
-                vals.append(_format_val(v, dec))
-            f.write(sep.join(vals) + "\n")
-
-    return fpath
+            print(f"[POST] Error {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"[POST] Exception: {e}")
 
 
 # ------------------ main (chaînage par dernier fichier) ------------------
 
-def main():
-    ap = argparse.ArgumentParser(description="Generate fake time-series files every interval, cloning or resuming schema.")
+
+    ap = argparse.ArgumentParser(description="Generate fake time-series rows and POST to backend.")
     ap.add_argument("--template", required=True, help="Path to a sample data file (.txt/.csv)")
-    ap.add_argument("--out", default="data", help="Output directory for generated files (default: ./data)")
-    ap.add_argument("--station", default="GP2", help="Station name to embed in filename")
-    ap.add_argument("--interval", type=int, default=60, help="Seconds between files (default 60)")
-    ap.add_argument("--simulate", type=int, default=0, help="If >0, create N files then exit")
+    ap.add_argument("--station", default="GP2", help="Station name to embed in row")
+    ap.add_argument("--interval", type=int, default=60, help="Seconds between rows (default 60)")
+    ap.add_argument("--simulate", type=int, default=0, help="If >0, create N rows then exit")
     ap.add_argument("--seed", type=int, default=None, help="Optional RNG seed for reproducibility")
-    ap.add_argument("--continue-from-latest", dest="cont_latest", action="store_true", default=True,
-                    help="Resume from latest output file if available")
-    ap.add_argument("--no-continue-from-latest", dest="cont_latest", action="store_false",
-                    help="Disable chaining from the latest file")
+    ap.add_argument("--backend-url", default="http://localhost:5000/api/gp2_data", help="Backend API URL to POST rows")
     args = ap.parse_args()
 
     if args.seed is not None:
         np.random.seed(args.seed)
 
-    out_dir = Path(args.out).resolve()
-
-    latest = _find_latest_file(out_dir) if args.cont_latest else None
-    base_path = latest if latest is not None else Path(args.template)
-
-    df, meta = read_template(str(base_path))
+    df, meta = read_template(str(args.template))
     schema = detect_time_schema(df, meta)
     ts = get_time_series(df, schema)
     df = df[ts.notna()].reset_index(drop=True)
@@ -320,28 +293,29 @@ def main():
         print("No parsable data rows.", file=sys.stderr)
         sys.exit(2)
 
-    # premier nouveau fichier
+    # First new row
     new_row = generate_next_row(df, meta)
+    post_row_to_backend(new_row, meta, station=args.station, backend_url=args.backend_url)
     df_next = pd.concat([df, new_row.to_frame().T], ignore_index=True)
-    last_path = write_file(df_next, meta, out_dir, station=args.station, coherent_time=True)
-    print(f"Wrote: {last_path}")
 
-    # boucle: à chaque tour, RE-LIRE le dernier fichier et réécrire un nouveau fichier
+    # Loop: each iteration, generate new row and POST
     count = args.simulate - 1 if args.simulate > 0 else -1
     while True:
         if args.simulate > 0 and count <= 0:
             break
         time.sleep(args.interval)
 
-        df, meta = read_template(str(last_path))
+        df, meta = read_template(str(args.template))
         schema = detect_time_schema(df, meta)
         ts = get_time_series(df, schema)
         df = df[ts.notna()].reset_index(drop=True)
+        # Add all previously generated rows
+        df_next = pd.concat([df_next, new_row.to_frame().T], ignore_index=True)
 
-        new_row = generate_next_row(df, meta)
-        df_next = pd.concat([df, new_row.to_frame().T], ignore_index=True)
-        last_path = write_file(df_next, meta, out_dir, station=args.station, coherent_time=True)
-        print(f"Wrote: {last_path}")
+        new_row = generate_next_row(df_next, meta)
+        post_row_to_backend(new_row, meta, station=args.station, backend_url=args.backend_url)
+        # Update buffer
+        df_next = pd.concat([df_next, new_row.to_frame().T], ignore_index=True)
 
         if args.simulate > 0:
             count -= 1

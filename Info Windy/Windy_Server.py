@@ -1,43 +1,3 @@
-
-from pathlib import Path
-import sys
-import subprocess
-import threading
-
-from flask import Flask, jsonify, render_template, request, send_from_directory
-app = Flask(__name__)
-
-# --- Lancer le générateur de données fake_data_generator.py au démarrage (si pas déjà lancé) ---
-FAKE_DATA_DIR = Path(__file__).parent  # Les fichiers seront générés ici
-FAKE_DATA_TEMPLATE = FAKE_DATA_DIR / "GP2 03-12-24_07-30-33.txt"  # À adapter si besoin
-FAKE_DATA_PROCESS = None
-
-def start_fake_data_generator():
-    global FAKE_DATA_PROCESS
-    # Vérifier si un process n'est pas déjà lancé
-    if FAKE_DATA_PROCESS is not None and FAKE_DATA_PROCESS.poll() is None:
-        return  # Déjà lancé
-    # Lancer le générateur en tâche de fond
-    if not FAKE_DATA_TEMPLATE.exists():
-        print(f"[FAKE DATA] Template manquant: {FAKE_DATA_TEMPLATE}")
-        return
-    cmd = [sys.executable, str(FAKE_DATA_DIR / "fake_data_generator.py"),
-           "--template", str(FAKE_DATA_TEMPLATE),
-           "--out", str(FAKE_DATA_DIR),
-           "--station", "GP2",
-           "--interval", "60"]
-    try:
-        FAKE_DATA_PROCESS = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print("[FAKE DATA] Générateur lancé en tâche de fond.")
-    except Exception as e:
-        print(f"[FAKE DATA] Erreur au lancement du générateur: {e}")
-
-# Lancer au démarrage du serveur (thread pour ne pas bloquer Flask)
-def _start_generator_thread():
-    t = threading.Thread(target=start_fake_data_generator, daemon=True)
-    t.start()
-
-_start_generator_thread()
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -48,6 +8,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+from flask import Flask, jsonify, render_template, request, send_from_directory
 import requests
 import math
 import os
@@ -163,32 +124,90 @@ def compute_fields(use_cache: bool = True, data_dir: Path = None) -> Dict[str, A
         Dictionnaire avec les données fusionnées
     """
     global _last_fusion_result, _last_fusion_timestamp
-
-    # Forcer le dossier de données à celui du générateur
-    core.STATION_CFG.data_dir = FAKE_DATA_DIR
-
-    # Vérifier le cache d'abord
+    
+    # Vérifier le cache d'abord (mais seulement si c'est le même dossier)
     if use_cache and _last_fusion_result is not None and _last_fusion_timestamp is not None:
         from datetime import datetime
         cache_age = (datetime.now() - _last_fusion_timestamp).total_seconds()
-        if cache_age < _fusion_cache_ttl:
+        # Ne pas utiliser le cache si un dossier personnalisé est demandé
+        if data_dir is None and cache_age < _fusion_cache_ttl:
             return _last_fusion_result
-
+    
+    # Acquérir le verrou pour éviter les appels simultanés
     with _fusion_lock:
-        # Double-check cache
+        # Vérifier à nouveau le cache après avoir acquis le verrou (double-check)
         if use_cache and _last_fusion_result is not None and _last_fusion_timestamp is not None:
             from datetime import datetime
             cache_age = (datetime.now() - _last_fusion_timestamp).total_seconds()
-            if cache_age < _fusion_cache_ttl:
+            # Ne pas utiliser le cache si un dossier personnalisé est demandé
+            if data_dir is None and cache_age < _fusion_cache_ttl:
                 return _last_fusion_result
-
+        
+        # Sauvegarder le data_dir original
+        original_data_dir = core.STATION_CFG.data_dir
+        
         try:
+            # Modifier temporairement le data_dir si un dossier personnalisé est fourni
+            if data_dir is not None:
+                # Vérifier que le dossier existe avant de l'utiliser
+                if not data_dir.exists() or not data_dir.is_dir():
+                    logger.error(f"Dossier personnalisé n'existe pas: {data_dir}")
+                    logger.error(f"Chemin absolu: {data_dir.resolve()}")
+                    # Vérifier si le dossier par défaut existe
+                    if core.STATION_CFG.data_dir.exists():
+                        logger.warning("Utilisation du dossier par défaut à la place")
+                        data_dir = None  # Utiliser le défaut
+                    else:
+                        # Aucun dossier disponible, lever une erreur
+                        raise FileNotFoundError(f"Aucun dossier de données disponible. Dossier personnalisé: {data_dir}, Dossier par défaut: {core.STATION_CFG.data_dir}")
+                else:
+                    logger.info(f"Utilisation du dossier personnalisé pour compute_fields: {data_dir}")
+                    logger.info(f"Chemin absolu: {data_dir.resolve()}")
+                    # Vérifier qu'il y a des fichiers dans le dossier
+                    txt_files = list(data_dir.glob("*.txt"))
+                    logger.info(f"Fichiers .txt trouvés dans le dossier: {len(txt_files)}")
+                    if txt_files:
+                        logger.info(f"Exemples de fichiers: {[f.name for f in txt_files[:5]]}")
+                    core.STATION_CFG.data_dir = data_dir
+            
+            logger.debug("Calcul du champ fusionné (verrou acquis)")
             station_meas, model, fused = core.run_fusion_once(with_plots=False)
         except FileNotFoundError as e:
-            logger.error(f"Erreur FileNotFoundError: {e}")
-            raise
+            # Si le fichier n'est pas trouvé, essayer avec le dossier par défaut (seulement si différent)
+            if data_dir is not None and data_dir != original_data_dir:
+                logger.warning(f"Fichier non trouvé dans le dossier personnalisé: {e}")
+                logger.warning(f"Dossier personnalisé: {data_dir}")
+                # Vérifier si le dossier par défaut existe
+                if original_data_dir.exists():
+                    logger.info("Tentative avec le dossier par défaut...")
+                    # Restaurer le data_dir original
+                    core.STATION_CFG.data_dir = original_data_dir
+                    # Réessayer avec le dossier par défaut
+                    try:
+                        station_meas, model, fused = core.run_fusion_once(with_plots=False)
+                    except FileNotFoundError as e2:
+                        logger.error(f"Fichier également non trouvé dans le dossier par défaut: {e2}")
+                        raise FileNotFoundError(f"Aucun fichier de données trouvé. Dossier personnalisé: {data_dir}, Dossier par défaut: {original_data_dir}. Erreur: {e}")
+                else:
+                    logger.error(f"Le dossier par défaut n'existe pas non plus: {original_data_dir}")
+                    raise FileNotFoundError(f"Aucun dossier de données disponible. Dossier personnalisé: {data_dir}, Dossier par défaut: {original_data_dir}. Erreur: {e}")
+            else:
+                # Si c'était déjà le défaut, propager l'erreur avec plus de détails
+                logger.error(f"Erreur FileNotFoundError: {e}")
+                logger.error(f"Dossier utilisé: {core.STATION_CFG.data_dir}")
+                logger.error(f"Dossier existe: {core.STATION_CFG.data_dir.exists()}")
+                if core.STATION_CFG.data_dir.exists():
+                    # Lister les fichiers pour aider au débogage
+                    all_files = list(core.STATION_CFG.data_dir.glob("*.txt"))
+                    logger.error(f"Fichiers .txt dans le dossier: {[f.name for f in all_files]}")
+                raise
+        finally:
+            # Restaurer le data_dir original
+            if data_dir is not None:
+                core.STATION_CFG.data_dir = original_data_dir
 
         ny, nx = core.GRID_CFG.ny, core.GRID_CFG.nx
+
         lat_vals = np.linspace(core.GRID_CFG.lat_min, core.GRID_CFG.lat_max, ny)
         lon_vals = np.linspace(core.GRID_CFG.lon_min, core.GRID_CFG.lon_max, nx)
         lat2d, lon2d = np.meshgrid(lat_vals, lon_vals, indexing="ij")
@@ -207,7 +226,7 @@ def compute_fields(use_cache: bool = True, data_dir: Path = None) -> Dict[str, A
             "lon": lon2d.tolist(),
 
             "temp": fused.temp_corr.tolist(),
-            "rh": fused.rh_corr.tolist(),
+            "rh": fused.rh_corr.tolist(),          # ← IMPORTANT : humidité
             "u": fused.u_corr.tolist(),
             "v": fused.v_corr.tolist(),
 
@@ -226,9 +245,12 @@ def compute_fields(use_cache: bool = True, data_dir: Path = None) -> Dict[str, A
                 "air_temp_c": float(station_meas.air_temp_c),
             },
         }
-
+        
+        # Mettre à jour le cache
+        from datetime import datetime
         _last_fusion_result = data
         _last_fusion_timestamp = datetime.now()
+        
         return data
 
 
@@ -998,6 +1020,115 @@ def api_health():
     # S'assurer que les headers CORS sont présents même si flask-cors n'est pas installé
     response.headers.add('Access-Control-Allow-Origin', '*')
     return response
+
+
+# ============================================================
+# Upload GP2 : permet à un script local d'envoyer les fichiers
+# GP2 vers le serveur distant (Railway) via HTTP POST
+# ============================================================
+
+# Clé API pour sécuriser l'upload (à définir dans .env / variables Railway)
+UPLOAD_API_KEY = os.environ.get("UPLOAD_API_KEY", "")
+# Nombre max de fichiers GP2 à conserver sur le serveur (pour éviter de remplir le disque)
+MAX_GP2_FILES = int(os.environ.get("MAX_GP2_FILES", "50"))
+
+
+def _cleanup_old_gp2_files(data_dir: Path, keep: int = None):
+    """
+    Supprime les fichiers GP2_*.txt les plus anciens pour ne garder que `keep` fichiers.
+    Appelé automatiquement après chaque upload.
+    """
+    if keep is None:
+        keep = MAX_GP2_FILES
+    pattern = f"{core.STATION_CFG.name}_*.txt"
+    gp2_files = sorted(data_dir.glob(pattern), key=lambda f: f.stat().st_mtime)
+    if len(gp2_files) > keep:
+        to_delete = gp2_files[:len(gp2_files) - keep]
+        for f in to_delete:
+            try:
+                f.unlink()
+                logger.info(f"🗑️  Ancien fichier supprimé: {f.name}")
+            except Exception as e:
+                logger.warning(f"Impossible de supprimer {f.name}: {e}")
+
+
+@app.route("/api/upload-gp2", methods=["POST"])
+def api_upload_gp2():
+    """
+    Reçoit un fichier GP2 envoyé par le script local (upload_gp2_remote.py)
+    et le sauvegarde dans le dossier data du serveur.
+
+    Headers requis:
+        X-Api-Key: la clé d'upload (doit correspondre à UPLOAD_API_KEY)
+
+    Body (multipart/form-data):
+        file: le fichier GP2_*.txt à envoyer
+    """
+    # --- Authentification ---
+    if UPLOAD_API_KEY:
+        provided_key = request.headers.get("X-Api-Key", "")
+        if provided_key != UPLOAD_API_KEY:
+            logger.warning("Upload GP2 refusé: clé API invalide")
+            return jsonify({"error": "Clé API invalide", "status": "error"}), 403
+    else:
+        logger.warning("⚠️  UPLOAD_API_KEY non définie – upload non sécurisé !")
+
+    # --- Validation du fichier ---
+    if "file" not in request.files:
+        return jsonify({"error": "Aucun fichier fourni (champ 'file' manquant)", "status": "error"}), 400
+
+    uploaded = request.files["file"]
+    if uploaded.filename == "":
+        return jsonify({"error": "Nom de fichier vide", "status": "error"}), 400
+
+    fname = uploaded.filename
+    # Accepter GP2_DD-MM-YY_HH-MM-SS.txt  (format attendu par FNAME_REGEX)
+    if not core.FNAME_REGEX.search(fname):
+        return jsonify({
+            "error": f"Nom de fichier invalide : {fname}. Attendu : GP2_DD-MM-YY_HH-MM-SS.txt",
+            "status": "error"
+        }), 400
+
+    # --- Sauvegarde ---
+    data_dir = core.STATION_CFG.data_dir
+    data_dir.mkdir(parents=True, exist_ok=True)
+    dest = data_dir / fname
+    uploaded.save(str(dest))
+    logger.info(f"✅ Fichier GP2 reçu et sauvegardé: {dest.name} ({dest.stat().st_size} octets)")
+
+    # --- Nettoyage automatique ---
+    _cleanup_old_gp2_files(data_dir)
+
+    # --- Invalider le cache pour que les prochaines requêtes utilisent les nouvelles données ---
+    global _last_fusion_result, _last_fusion_timestamp, _dashboard_cache
+    _last_fusion_result = None
+    _last_fusion_timestamp = None
+    _dashboard_cache = {}
+
+    return jsonify({
+        "status": "ok",
+        "filename": fname,
+        "size": dest.stat().st_size,
+        "files_in_data": len(list(data_dir.glob(f"{core.STATION_CFG.name}_*.txt")))
+    })
+
+
+@app.route("/api/list-gp2", methods=["GET"])
+def api_list_gp2():
+    """
+    Liste les fichiers GP2 présents sur le serveur (utile pour debug).
+    """
+    data_dir = core.STATION_CFG.data_dir
+    if not data_dir.exists():
+        return jsonify({"files": [], "count": 0})
+    files = []
+    for f in sorted(data_dir.glob(f"{core.STATION_CFG.name}_*.txt"), key=lambda x: x.stat().st_mtime, reverse=True):
+        files.append({
+            "name": f.name,
+            "size": f.stat().st_size,
+            "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
+        })
+    return jsonify({"files": files, "count": len(files)})
 
 
 # Variable globale pour stocker le data_dir sélectionné (utilisée par l'interface Windy)
@@ -2839,7 +2970,7 @@ if __name__ == "__main__":
     
     # Configuration pour le déploiement (utilise les variables d'environnement)
     # En production, les plateformes cloud définissent PORT automatiquement
-    host = os.environ.get("HOST", "0.0.0.0")  # Par défaut 0.0.0.0 pour cloud/deployment
+    host = os.environ.get("HOST", "127.0.0.1")  # Par défaut localhost pour dev local
     port = int(os.environ.get("PORT", 5000))  # Par défaut 5000, mais Railway/Render utilisent leur propre PORT
     
     # Mode debug uniquement en développement local
